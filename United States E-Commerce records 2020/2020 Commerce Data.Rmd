@@ -1,0 +1,305 @@
+---
+title: "2020 E-Commerce Report"
+author: "Mohammad Savarmand"
+date: "2023-09-26"
+output: 
+  html_document: 
+    toc: yes
+    df_print: tibble
+    highlight: zenburn
+    theme: darkly
+---
+
+```{css, echo = FALSE}
+  pre:not([class]) {
+    color: #efef8f;
+    background-color: #4f4f4f;
+  }
+```
+
+# Setup
+
+## Load dataset and packages
+
+```{r message=FALSE,echo=FALSE}
+rm(list=ls())
+file <- "US_E-commerce_records_2020.csv"
+```
+
+```{r message = FALSE}
+library(tidyverse)
+set.seed(1)
+# https://www.kaggle.com/datasets/ammaraahmad/us-ecommerce-record-2020
+
+df <- read_csv(file)
+```
+
+## Check to see if an NAs
+
+```{r}
+sum(is.na(df))
+
+```
+
+## Getting numeric columns for future numerical analysis
+
+```{r}
+df_numeric <- df %>%
+  # Select all numeric columns
+  select(where(is.numeric)) %>%
+  # Excluding Row_ID and Postal Code
+  select(-c(1:2))
+names(df_numeric)
+```
+
+## Removing Outliers (1.5 IQR test)
+
+### Setting conditions
+
+```{r}
+# IQR vector for all columns
+IQR_vector <- sapply(df_numeric,IQR)
+
+
+# Create a list of logicals to index the original datasets
+# Index values with "TRUE" will keep their rows
+# Index values with "FALSE" will drop their rows
+conditions <- lapply(1:ncol(df_numeric), function(col_num) {
+  
+  # Setting up the condition values
+  IQR_value <- IQR_vector[col_num]
+  # Q1 and Q3 for the column being referenced
+  Q1_Q3_values <- quantile(df_numeric[[col_num]],probs=c(0.25,0.75))
+  
+  
+  # Create a list of conditions for the column being referenced 
+  return(df_numeric[, col_num] > Q1_Q3_values[1] - 1.5*IQR_value &
+         df_numeric[, col_num] < Q1_Q3_values[2] + 1.5*IQR_value)
+})
+
+```
+
+### Recursively Intersecting the conditions set
+
+```{r}
+# Recursively interesect the conditions until 
+# we get one vector of True and Falses to index ROWS ON NOT COLUMNS (*IMPORTANT*) 
+combined_condition <- Reduce(`&`, conditions)
+```
+
+### Filter on conditions and check
+
+```{r}
+# Filter the dataframe on the ROW conditions
+df_numeric_filt <- df_numeric[combined_condition, ]
+df_filt <- df[combined_condition, ]
+
+# Check the dimensions of the before and after
+dim(df_numeric)
+
+dim(df_numeric_filt)
+```
+
+# EDA
+
+## K-Means Cluster Analysis
+
+### Elbow Method
+
+```{r}
+# Perform clustering with different number of clusters (k)
+k_values <- 2:10  # Range of k values to try
+
+# Setting up empty vector of zeros
+wcss <- numeric(length(k_values))
+
+# Use kmeans and iterate over each k value and calculate WCSS
+for (i in seq_along(k_values)) {
+  k <- k_values[i]
+  kmeans_result <- kmeans(df_numeric_filt, centers = k)
+  
+  # The lower the number, the closer the points are to each other
+  # As we increase the cluster amount, they will become closer to each other
+  # What we are after is the moment where the WCSS drops the greatest
+  wcss[i] <- kmeans_result$tot.withinss
+}
+
+# Calculate the rate of decrease in WCSS
+## Put a zero because diff calculates the difference between the vector
+## This means we lose 1 length because the beginning doesn't have a difference
+wcss_diff <- c(0, diff(wcss))
+
+# I do this to get rid of negatives. The value with 1 is the max
+wcss_diff_pct <- abs(wcss_diff) / max(abs(wcss_diff))
+
+# Find the optimal k based on the the maximum rate of decrease
+elbow_index <- which.max(wcss_diff_pct)
+
+# Not 100% if this is correct, but doing it like this makes sense when doing this
+# for iris, a dataframe known to have 3 clusters
+optimal_k <- k_values[elbow_index]
+
+
+# Plot the WCSS for different k values
+ggplot(data = data.frame(k = k_values, WCSS = wcss), aes(x = k, y = WCSS)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Number of clusters (k)",
+       y = "Within-Cluster Sum of Squares (WCSS)", title = "Elbow Method")+
+  geom_vline(xintercept = optimal_k,
+             linetype = "dashed",
+             color = "blue")
+```
+
+### Performing k-means
+
+```{r}
+# kmeans using 3 centers optimal_k
+kmeans_basic <- kmeans(df_numeric_filt, centers = optimal_k)
+
+# Overview of the kmeans cluster
+# size=length of each cluster
+# centers shows the centers for each column and for each k 
+kmeans_basic_table <- tibble(data.frame(kmeans_basic$size, kmeans_basic$centers))
+
+# Assigning the correct clusters with the correct rows. 
+# Notice this is the 
+kmeans_basic_df <- tibble(data.frame(Cluster = as.factor(kmeans_basic$cluster),df_filt))
+
+# Numeric df
+kmeans_numeric_basic_df <- tibble(
+  data.frame(
+    Cluster = as.factor(kmeans_basic$cluster),
+    df_numeric_filt))
+
+glimpse(kmeans_numeric_basic_df)
+```
+
+## Graphing
+
+### Creating ggplot-callable names
+
+Instead of constantly typing the names of the columns manually (which I still do), I decided to figure out how to make ggplot graphs iterable.
+
+```{r}
+all_names <- kmeans_basic_df %>%
+  names() %>%
+  tibble(ID = 1:length(.),
+         Names = .)
+
+all_numeric_names <- kmeans_numeric_basic_df %>%
+  names() %>%
+  tibble(ID = 1:length(.),
+         Names = .)
+```
+
+### Graphing with indexing
+
+```{r}
+# Convert strings into symbols so ggplot can interpret our stored strings
+char_to_sym <- function(string_name){
+  string_name %>%
+    as.character %>%
+    sym
+}
+# store the column you want for the x variable
+x_var <- char_to_sym(all_names[7,2])
+
+# store the column you want for the "fill" aesthetic
+fill_var <- char_to_sym(all_names[1,2])
+
+# notice how I wrote !!x_var and !!y_var instead of Segment and Cluster
+ggplot(data = kmeans_basic_df, aes(x = !!x_var, fill = !!fill_var)) +
+  geom_bar(position = "dodge")+
+  ggtitle("Quantity Counts by Cluster") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+### Pairplot
+
+```{r message=FALSE}
+library(GGally)
+ggpairs(kmeans_numeric_basic_df,aes(color=Cluster))
+
+```
+
+### Cluster graph using factoextra
+
+```{r message=FALSE}
+library(factoextra)
+# scaling the dataframe helps make a better picture, but scaling on the original dataframe is not always the best solution.
+kmeans_scale <- kmeans(scale(df_numeric_filt), centers = optimal_k, nstart = 100)
+
+fviz_cluster(object = kmeans_scale,
+             data = scale(df_numeric_filt),
+             geom = c("point"),
+             ellipse.type = "convex")
+```
+
+# Data Analysis
+
+Looking at the pairplot, we can see that the average sales numbers (graph[1,2]) are different between each cluster, but the profits(graph[1,5]) for 2 of the clusters are the same. This may indicate that the profits plateau after a certain sale number, and in fact, they somewhat do when looking at graph[2,5].
+
+## Aggregating the data
+
+### Setting up functions to be iterable (for future use)
+
+```{r}
+# Remind us of this name df
+all_names
+# Convert strings into symbols so ggplot can interpret our stored strings
+count_var <- char_to_sym(all_names[7,2]) 
+
+group_by_var <- char_to_sym(all_names[5,2])
+
+# Grouping the clusters by the segments 
+df_alter <- kmeans_basic_df %>%
+  # notice how I wrote !!group_by_var instead of Cluster
+  group_by(!!group_by_var) %>%
+  # notice how I wrote !!count_by_var instead of Segment  
+  count(!!count_var) %>%
+  pivot_wider(names_from = !!count_var, values_from = n ) %>%
+  # These two bottom lines are dumb but make the code work q-q
+  data.frame() %>% 
+  tibble()
+
+```
+
+## Percentages of Clusters in Segments, vice versa
+
+```{r}
+# Vertical changes. What percent of clusters make up each column?
+df_alter %>%
+  mutate(across(-!!group_by_var, ~ (. / sum(.)) * 100))
+
+# Horizontal changes. What percent of segments make up each cluster?
+df_alter %>%
+  mutate(across(-!!group_by_var, ~ (. / rowSums(across(-!!group_by_var)))*100 ))
+```
+
+## Finding the min/max of Sales and Price in relation to the Clusters
+
+```{r}
+mutate_var1 <- char_to_sym(all_names[17,2])
+
+mutate_var2 <- char_to_sym(all_names[20,2])
+
+sale_profit_summary <- kmeans_basic_df %>%
+  group_by(!!group_by_var) %>%
+  summarize(
+    mutate(
+      across(
+        c(!!mutate_var1,!!mutate_var2),
+        list(max=max,min=min)
+      )
+    )
+  )
+
+sale_profit_summary
+```
+
+# Conclusion
+
+We can only conclude that although Cluster 1 had significantly fewer sales than Cluster 2, they still managed to have the same profit. If we aim for a system where we make the most profit, we must determine how Cluster 1 achieved those profits.
+
+There is currently no single variable or group that differentiates cluster 1 from cluster 2, but if we were to iterate through the "df_alter" object with every single name from the "all_names" object, we might find something after more analysis.
