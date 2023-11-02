@@ -250,7 +250,7 @@ all_names
 # Convert strings into symbols so ggplot can interpret our stored strings
 count_var <- char_to_sym(all_names[7,2]) 
 
-group_by_var <- char_to_sym(all_names[5,2])
+group_by_var <- char_to_sym(all_names[1,2])
 
 # Grouping the clusters by the segments 
 df_alter <- kmeans_basic_df %>%
