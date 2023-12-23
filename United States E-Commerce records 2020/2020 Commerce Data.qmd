@@ -1,32 +1,27 @@
 ---
-title: "2020 E-Commerce Report"
-author: "Mohammad Savarmand"
-date: "2023-09-26"
-output: 
-  html_document: 
-    toc: yes
-    df_print: tibble
-    highlight: zenburn
-    theme: darkly
+title: "2020 US Commerce Data"
+author: Mohammad Savarmand
+date: 2023-12-22
+format: 
+    html:
+        toc: true
+        code-fold: true
+        embed-resources: true
+theme: superhero
 ---
-
-```{css, echo = FALSE}
-  pre:not([class]) {
-    color: #efef8f;
-    background-color: #4f4f4f;
-  }
-```
-
 # Setup
 
 ## Load dataset and packages
 
-```{r message=FALSE,echo=FALSE}
+```{r}
+#| output: false 
+#| echo: false
 rm(list=ls())
 file <- "US_E-commerce_records_2020.csv"
 ```
 
-```{r message = FALSE}
+```{r}
+#| output: false
 library(tidyverse)
 set.seed(1)
 # https://www.kaggle.com/datasets/ammaraahmad/us-ecommerce-record-2020
